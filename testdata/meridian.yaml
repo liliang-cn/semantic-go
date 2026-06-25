@@ -1,0 +1,92 @@
+# Meridian Retail semantic model — maps the normalized warehouse to business
+# meaning. The agent names metrics/dimensions; it never sees these tables.
+
+entities:
+  - {name: order,      table: orders,      primary_key: order_id}
+  - {name: order_item, table: order_items, primary_key: item_id}
+  - {name: refund,     table: refunds,     primary_key: refund_id}
+  - {name: product,    table: products,    primary_key: product_id}
+  - {name: store,      table: stores,      primary_key: store_id}
+  - {name: customer,   table: customers,   primary_key: customer_id}
+  - {name: supplier,   table: suppliers,   primary_key: supplier_id}
+
+# Join graph: declared edges only. Cardinality drives safe (many-to-one) traversal.
+joins:
+  - {from: order,      to: order_item, cardinality: one_to_many, from_key: order_id,    to_key: order_id}
+  - {from: order,      to: refund,     cardinality: one_to_many, from_key: order_id,    to_key: order_id}
+  - {from: order,      to: store,      cardinality: many_to_one, from_key: store_id,    to_key: store_id}
+  - {from: order,      to: customer,   cardinality: many_to_one, from_key: customer_id, to_key: customer_id}
+  - {from: order_item, to: product,    cardinality: many_to_one, from_key: product_id,  to_key: product_id}
+  - {from: product,    to: supplier,   cardinality: many_to_one, from_key: supplier_id, to_key: supplier_id}
+  # NOTE: there is deliberately no order_item -> supplier edge except via product,
+  # and no path that lets an order-grain metric be sliced by product (would fan out).
+
+dimensions:
+  - {name: store_region,      entity: store,    column: region,     type: categorical}
+  - {name: store_type,        entity: store,    column: store_type, type: categorical}
+  - {name: product_category,  entity: product,  column: category,   type: categorical}
+  - {name: product_brand,     entity: product,  column: brand,      type: categorical}
+  - {name: customer_segment,  entity: customer, column: segment,    type: categorical}
+  - {name: customer_email,    entity: customer, column: email,      type: categorical, mask: "'***'"}
+  - {name: supplier_country,  entity: supplier, column: country,    type: categorical}
+  - {name: order_status,      entity: order,    column: status,     type: categorical}
+  - {name: order_date,        entity: order,    column: order_date, type: time}
+
+metrics:
+  - name: total_revenue
+    description: "Gross sales = sum of quantity * unit_price at line-item grain."
+    synonyms: [revenue, sales, top line, gross revenue]
+    entity: order_item
+    agg: sum
+    expr: "quantity * unit_price"
+
+  - name: units_sold
+    description: "Total units sold across line items."
+    synonyms: [units, quantity sold]
+    entity: order_item
+    agg: sum
+    expr: "quantity"
+
+  - name: order_count
+    description: "Number of distinct orders."
+    synonyms: [orders, number of orders]
+    entity: order
+    agg: count_distinct
+    expr: "order_id"
+
+  - name: refund_total
+    description: "Total refunded amount."
+    synonyms: [refunds, returns]
+    entity: refund
+    agg: sum
+    expr: "refund_amount"
+
+  - name: net_revenue
+    description: "Net sales after refunds. Finance's official revenue figure."
+    synonyms: [net sales, net]
+    formula: "total_revenue - refund_total"
+    roles: [finance, admin]   # RBAC: only these roles may resolve net_revenue
+
+  - name: avg_order_value
+    description: "Average revenue per order (AOV). A ratio — never summed."
+    synonyms: [aov, average order value]
+    formula: "total_revenue / nullif(order_count, 0)"
+
+  # Time intelligence (window metrics; require a time dimension in group_by).
+  - name: revenue_rolling_3
+    description: "Rolling 3-period sum of total revenue."
+    synonyms: [rolling revenue, moving revenue]
+    of: total_revenue
+    window: "rolling:3"
+
+  - name: revenue_delta
+    description: "Period-over-period change in total revenue (e.g. month-over-month)."
+    synonyms: [revenue change, mom, momentum]
+    of: total_revenue
+    window: "delta:1"
+
+  - name: revenue_cumulative
+    description: "Cumulative running total of revenue."
+    synonyms: [running total, ytd revenue]
+    of: total_revenue
+    window: "cumulative"
