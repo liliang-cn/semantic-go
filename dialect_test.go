@@ -28,6 +28,7 @@ func TestDialectsCompileDistinctSQL(t *testing.T) {
 		{Postgres{}, `"`, "date_trunc('month'", "$1", "IS NOT DISTINCT FROM"},
 		{Snowflake{}, `"`, "DATE_TRUNC('month'", ":1", "IS NOT DISTINCT FROM"},
 		{Databricks{}, "`", "date_trunc('MONTH'", "?", "<=>"},
+		{DuckDB{}, `"`, "date_trunc('month'", "$1", "IS NOT DISTINCT FROM"},
 	}
 	for _, c := range cases {
 		t.Run(c.dialect.Name(), func(t *testing.T) {
@@ -59,7 +60,7 @@ func TestDialectsCompileDistinctSQL(t *testing.T) {
 func TestDialectByName(t *testing.T) {
 	for name, want := range map[string]string{
 		"postgres": "postgres", "snowflake": "snowflake",
-		"databricks": "databricks", "spark": "databricks", "duckdb": "ansi",
+		"databricks": "databricks", "spark": "databricks", "duckdb": "duckdb",
 	} {
 		d, ok := DialectByName(name)
 		if !ok || d.Name() != want {

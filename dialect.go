@@ -78,6 +78,24 @@ func (Databricks) DistinctFrom(l, r string) string {
 	return l + " <=> " + r
 }
 
+// DuckDB dialect: largely Postgres-compatible (double-quoted identifiers,
+// positional $N binds, native DATE_TRUNC and IS NOT DISTINCT FROM) — its own type
+// so routing and any future divergence stay explicit rather than falling back to
+// the generic ANSI shape.
+type DuckDB struct{}
+
+func (DuckDB) Name() string { return "duckdb" }
+func (DuckDB) QuoteIdent(id string) string {
+	return `"` + strings.ReplaceAll(id, `"`, `""`) + `"`
+}
+func (DuckDB) DateTrunc(grain, expr string) string {
+	return fmt.Sprintf("date_trunc('%s', %s)", grain, expr)
+}
+func (DuckDB) Placeholder(i int) string { return fmt.Sprintf("$%d", i) }
+func (DuckDB) DistinctFrom(l, r string) string {
+	return l + " IS NOT DISTINCT FROM " + r
+}
+
 // DialectByName resolves a dialect by its Name() (case-insensitive). The bool is
 // false for an unknown name, so callers can fail loudly instead of guessing.
 func DialectByName(name string) (Dialect, bool) {
@@ -88,7 +106,9 @@ func DialectByName(name string) (Dialect, bool) {
 		return Snowflake{}, true
 	case "databricks", "spark":
 		return Databricks{}, true
-	case "ansi", "duckdb", "sqlite":
+	case "duckdb":
+		return DuckDB{}, true
+	case "ansi", "sqlite":
 		return ANSI{}, true
 	default:
 		return nil, false
