@@ -268,9 +268,12 @@ func (c *compiler) resolveDims(names []string) error {
 	return nil
 }
 
+// qualify references a column by its entity ALIAS (the entity name), not the raw
+// table. Aliasing every entity lets the same physical table appear more than once
+// — role-playing dimensions (order_date vs ship_date) and bridge tables — without
+// the join referencing an ambiguous table name.
 func (c *compiler) qualify(entity, col string) string {
-	t := c.m.Entity(entity).Table
-	return c.d.QuoteIdent(t) + "." + c.d.QuoteIdent(col)
+	return c.d.QuoteIdent(entity) + "." + c.d.QuoteIdent(col)
 }
 
 // buildCTE aggregates one base metric to the requested dimension grain.
@@ -309,13 +312,16 @@ func (c *compiler) buildCTE(metricName string, dims []resolvedDim) (string, erro
 	sel = append(sel, agg+" AS "+c.d.QuoteIdent(metricName))
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "m_%s AS (\n  SELECT %s\n  FROM %s", metricName, strings.Join(sel, ", "),
-		c.d.QuoteIdent(c.m.Entity(base).Table))
+	// Alias the base table by entity name (e.g. FROM "orders" AS "order") so
+	// columns qualify against the alias and role-playing/bridge entities on the
+	// same physical table stay distinct.
+	fmt.Fprintf(&b, "m_%s AS (\n  SELECT %s\n  FROM %s AS %s", metricName, strings.Join(sel, ", "),
+		c.d.QuoteIdent(c.m.Entity(base).Table), c.d.QuoteIdent(base))
 	for _, j := range joins {
-		fmt.Fprintf(&b, "\n  JOIN %s ON %s.%s = %s.%s",
-			c.d.QuoteIdent(j.rightTable),
-			c.d.QuoteIdent(j.leftTable), c.d.QuoteIdent(j.leftCol),
-			c.d.QuoteIdent(j.rightTable), c.d.QuoteIdent(j.rightCol))
+		fmt.Fprintf(&b, "\n  JOIN %s AS %s ON %s.%s = %s.%s",
+			c.d.QuoteIdent(j.rightTable), c.d.QuoteIdent(j.rightAlias),
+			c.d.QuoteIdent(j.leftAlias), c.d.QuoteIdent(j.leftCol),
+			c.d.QuoteIdent(j.rightAlias), c.d.QuoteIdent(j.rightCol))
 	}
 	if where := c.buildWhere(); where != "" {
 		b.WriteString("\n  WHERE " + where)
@@ -370,8 +376,9 @@ func aggExpr(agg, expr string) (string, error) {
 }
 
 type joinStep struct {
-	rightTable string
-	leftTable  string
+	rightTable string // physical table of the joined (child) entity
+	rightAlias string // entity-name alias for it
+	leftAlias  string // entity-name alias of the parent it joins to
 	leftCol    string
 	rightCol   string
 }
@@ -428,7 +435,8 @@ func (c *compiler) planJoins(base string, need map[string]bool) ([]joinStep, err
 		cb := came[ent]
 		steps = append(steps, joinStep{
 			rightTable: c.m.Entity(ent).Table,
-			leftTable:  c.m.Entity(cb.parent).Table,
+			rightAlias: ent,
+			leftAlias:  cb.parent,
 			leftCol:    cb.e.leftCol,
 			rightCol:   cb.e.rightCol,
 		})
