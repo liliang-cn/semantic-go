@@ -44,3 +44,53 @@ func (ANSI) Placeholder(int) string { return "?" }
 func (ANSI) DistinctFrom(l, r string) string {
 	return "(" + l + " = " + r + " OR (" + l + " IS NULL AND " + r + " IS NULL))"
 }
+
+// Snowflake dialect: double-quoted identifiers, positional :N binds, native
+// DATE_TRUNC and IS NOT DISTINCT FROM.
+type Snowflake struct{}
+
+func (Snowflake) Name() string { return "snowflake" }
+func (Snowflake) QuoteIdent(id string) string {
+	return `"` + strings.ReplaceAll(id, `"`, `""`) + `"`
+}
+func (Snowflake) DateTrunc(grain, expr string) string {
+	return fmt.Sprintf("DATE_TRUNC('%s', %s)", grain, expr)
+}
+func (Snowflake) Placeholder(i int) string { return fmt.Sprintf(":%d", i) }
+func (Snowflake) DistinctFrom(l, r string) string {
+	return l + " IS NOT DISTINCT FROM " + r
+}
+
+// Databricks (Spark SQL) dialect: backtick-quoted identifiers, ? binds, and the
+// null-safe equality operator <=> for outer joins.
+type Databricks struct{}
+
+func (Databricks) Name() string { return "databricks" }
+func (Databricks) QuoteIdent(id string) string {
+	return "`" + strings.ReplaceAll(id, "`", "``") + "`"
+}
+func (Databricks) DateTrunc(grain, expr string) string {
+	// Spark SQL: date_trunc(fmt, ts); fmt is case-insensitive but conventionally upper.
+	return fmt.Sprintf("date_trunc('%s', %s)", strings.ToUpper(grain), expr)
+}
+func (Databricks) Placeholder(int) string { return "?" }
+func (Databricks) DistinctFrom(l, r string) string {
+	return l + " <=> " + r
+}
+
+// DialectByName resolves a dialect by its Name() (case-insensitive). The bool is
+// false for an unknown name, so callers can fail loudly instead of guessing.
+func DialectByName(name string) (Dialect, bool) {
+	switch strings.ToLower(name) {
+	case "postgres", "postgresql", "pg", "":
+		return Postgres{}, true
+	case "snowflake":
+		return Snowflake{}, true
+	case "databricks", "spark":
+		return Databricks{}, true
+	case "ansi", "duckdb", "sqlite":
+		return ANSI{}, true
+	default:
+		return nil, false
+	}
+}
