@@ -189,11 +189,28 @@ func (c *compiler) windowExpr(mt *Metric) (string, error) {
 	if timeRef == "" {
 		return "", fmt.Errorf("window metric %q needs a time dimension in group_by", mt.Name)
 	}
+	// Grain-to-date: restart the window at each boundary of mt.Reset (e.g.
+	// reset: year → YTD) by partitioning on the truncated period. Applying
+	// date_trunc to the already-grain-truncated timeRef is exact, since
+	// date_trunc(year, date_trunc(month, x)) = date_trunc(year, x).
+	if mt.Reset != "" {
+		parts = append(parts, c.d.DateTrunc(mt.Reset, timeRef))
+	}
 	over := "OVER ("
 	if len(parts) > 0 {
 		over += "PARTITION BY " + strings.Join(parts, ", ") + " "
 	}
 	over += "ORDER BY " + timeRef
+
+	// rolling/cumulative re-sum `value` across rows: refuse if the underlying
+	// measure is not safe to sum (semi/non-additive) — a structural guard
+	// against a clean-running but wrong roll-up.
+	isSum := mt.Window == "cumulative" || strings.HasPrefix(mt.Window, "rolling:")
+	if isSum {
+		if add := c.m.Additivity(mt.Of); add != Additive {
+			return "", fmt.Errorf("window metric %q sums %s metric %q over time — refused (%s measures cannot be summed; use a point-in-time pick or a ratio metric)", mt.Name, add, mt.Of, add)
+		}
+	}
 
 	switch {
 	case mt.Window == "cumulative":
