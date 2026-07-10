@@ -1,5 +1,10 @@
 # semantic-go
 
+[![CI](https://github.com/liliang-cn/semantic-go/actions/workflows/ci.yml/badge.svg)](https://github.com/liliang-cn/semantic-go/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/liliang-cn/semantic-go.svg)](https://pkg.go.dev/github.com/liliang-cn/semantic-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/liliang-cn/semantic-go)](https://goreportcard.com/report/github.com/liliang-cn/semantic-go)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A small, dependency-light **semantic layer compiler** for Go: declare your
 business metrics, dimensions, entities, and join graph once in YAML, then compile
 a typed *semantic query* into **fan-out / chasm-safe SQL** for any dialect.
@@ -83,6 +88,33 @@ metrics:
     of: total_revenue
     window: "cumulative"                       # time intelligence
 ```
+
+## CLI: `semc`
+
+`semc` compiles a semantic query to SQL and prints it. It opens no database —
+it only emits SQL (pipe it into `psql` to run).
+
+```sh
+go install github.com/liliang-cn/semantic-go/cmd/semc@latest
+```
+
+Flags:
+
+- `-model` — path to the semantic model YAML (default `testdata/meridian.yaml`)
+- `-metrics` — comma-separated metric names (required)
+- `-by` — comma-separated group-by dimensions
+- `-grain` — time grain for time dimensions (`day`|`month`|`quarter`|`year`)
+- `-limit` — row limit (0 = none)
+
+```sh
+# revenue by region
+semc -model testdata/meridian.yaml -metrics total_revenue -by store_region
+
+# monthly net revenue, last 12 rows
+semc -model testdata/meridian.yaml -metrics net_revenue -by order_date -grain month -limit 12
+```
+
+Compiled query args, if any, are printed to stderr as a `-- args:` comment.
 
 ## Metric types
 
