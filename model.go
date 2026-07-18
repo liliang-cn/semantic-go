@@ -23,6 +23,14 @@ type Model struct {
 	entity    map[string]*Entity
 	dimension map[string]*Dimension
 	metric    map[string]*Metric
+
+	// metricSyn maps a normalized synonym (or canonical name) to the canonical
+	// metric name, so a caller may name a metric by any declared synonym.
+	metricSyn map[string]string
+
+	// dimSyn maps a normalized synonym (or canonical name) to the canonical
+	// dimension name — the dimension analogue of metricSyn.
+	dimSyn map[string]string
 }
 
 // Entity is a real business thing with a primary key the layer joins on — the
@@ -47,11 +55,12 @@ type Join struct {
 // Dimension is a typed attribute to group/filter by, named in business words.
 // Mask is the SQL expression returned when the caller may not see the raw value.
 type Dimension struct {
-	Name   string `yaml:"name"`
-	Entity string `yaml:"entity"`
-	Column string `yaml:"column"`
-	Type   string `yaml:"type"` // categorical | time
-	Mask   string `yaml:"mask"`
+	Name     string   `yaml:"name"`
+	Entity   string   `yaml:"entity"`
+	Column   string   `yaml:"column"`
+	Type     string   `yaml:"type"` // categorical | time
+	Synonyms []string `yaml:"synonyms"`
+	Mask     string   `yaml:"mask"`
 }
 
 // Metric is an aggregated number with grain + aggregation locked in. A simple
@@ -155,6 +164,40 @@ func (m *Model) Index() error {
 			}
 		}
 		m.metric[mt.Name] = mt
+	}
+	// Synonym index: declared synonyms first (first metric wins a shared
+	// synonym), then canonical names last so a name always beats a synonym.
+	m.metricSyn = map[string]string{}
+	for i := range m.Metrics {
+		for _, syn := range m.Metrics[i].Synonyms {
+			k := normName(syn)
+			if k == "" {
+				continue
+			}
+			if _, taken := m.metricSyn[k]; !taken {
+				m.metricSyn[k] = m.Metrics[i].Name
+			}
+		}
+	}
+	for i := range m.Metrics {
+		m.metricSyn[normName(m.Metrics[i].Name)] = m.Metrics[i].Name
+	}
+	// Dimension synonym index (same precedence: declared synonyms first, then
+	// canonical names, so a name always beats a synonym).
+	m.dimSyn = map[string]string{}
+	for i := range m.Dimensions {
+		for _, syn := range m.Dimensions[i].Synonyms {
+			k := normName(syn)
+			if k == "" {
+				continue
+			}
+			if _, taken := m.dimSyn[k]; !taken {
+				m.dimSyn[k] = m.Dimensions[i].Name
+			}
+		}
+	}
+	for i := range m.Dimensions {
+		m.dimSyn[normName(m.Dimensions[i].Name)] = m.Dimensions[i].Name
 	}
 	for _, j := range m.Joins {
 		if m.entity[j.From] == nil || m.entity[j.To] == nil {
