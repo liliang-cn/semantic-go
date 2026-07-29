@@ -75,13 +75,22 @@ type compiler struct {
 	single    bool
 }
 
+// cte names the per-metric CTE, and keysAlias the UNION-ed key spine. Both are
+// generated identifiers, so both go through the dialect's quoting: "keys" is a
+// reserved word in MySQL, and an unquoted one turned every multi-metric query
+// into a syntax error. Quoting a generated name costs nothing and removes a
+// whole class of collision with whatever each engine happens to reserve.
+func (c *compiler) cte(metric string) string { return c.d.QuoteIdent("m_" + metric) }
+
+func (c *compiler) keysAlias() string { return c.d.QuoteIdent("keys") }
+
 // dimRef is how a dimension column is referenced in the outer SELECT (and in
 // window OVER clauses): from the single base CTE, or the UNION-ed `keys` spine.
 func (c *compiler) dimRef(d resolvedDim) string {
 	if c.single {
-		return "m_" + c.baseOrder[0] + "." + c.d.QuoteIdent(d.name)
+		return c.cte(c.baseOrder[0]) + "." + c.d.QuoteIdent(d.name)
 	}
-	return "keys." + c.d.QuoteIdent(d.name)
+	return c.keysAlias() + "." + c.d.QuoteIdent(d.name)
 }
 
 func (c *compiler) ph(v any) string {
@@ -164,7 +173,7 @@ func (c *compiler) exprFor(name string, visiting map[string]bool) (string, error
 		}
 		return "(" + out + ")", nil
 	default:
-		return fmt.Sprintf("COALESCE(m_%s.%s, 0)", name, c.d.QuoteIdent(name)), nil
+		return fmt.Sprintf("COALESCE(%s.%s, 0)", c.cte(name), c.d.QuoteIdent(name)), nil
 	}
 }
 
@@ -252,6 +261,7 @@ type resolvedDim struct {
 
 func (c *compiler) resolveDims(names []string) error {
 	out := make([]resolvedDim, 0, len(names))
+	applied := false
 	for _, n := range names {
 		dim := c.m.Dimension(n)
 		if dim == nil {
@@ -261,8 +271,17 @@ func (c *compiler) resolveDims(names []string) error {
 		expr := raw
 		if dim.Type == "time" && c.q.TimeGrain != "" {
 			expr = c.d.DateTrunc(c.q.TimeGrain, raw)
+			applied = true
 		}
 		out = append(out, resolvedDim{name: n, entity: dim.Entity, typ: dim.Type, sqlRaw: raw, sql: expr})
+	}
+	// A grain that matched no time dimension used to be dropped in silence: ask
+	// for revenue by month against a dimension the model calls categorical and
+	// you got daily rows, correctly computed and not what you asked for. Nothing
+	// about the answer says so. Refuse instead — a caller can act on an error.
+	if c.q.TimeGrain != "" && !applied {
+		return fmt.Errorf("time grain %q was requested but none of the group-by dimensions %v is declared type: time — "+
+			"fix the dimension's type in the model, or drop the grain", c.q.TimeGrain, names)
 	}
 	c.dims = out
 	return nil
@@ -315,7 +334,7 @@ func (c *compiler) buildCTE(metricName string, dims []resolvedDim) (string, erro
 	// Alias the base table by entity name (e.g. FROM "orders" AS "order") so
 	// columns qualify against the alias and role-playing/bridge entities on the
 	// same physical table stay distinct.
-	fmt.Fprintf(&b, "m_%s AS (\n  SELECT %s\n  FROM %s AS %s", metricName, strings.Join(sel, ", "),
+	fmt.Fprintf(&b, "%s AS (\n  SELECT %s\n  FROM %s AS %s", c.cte(metricName), strings.Join(sel, ", "),
 		c.d.QuoteIdent(c.m.Entity(base).Table), c.d.QuoteIdent(base))
 	for _, j := range joins {
 		fmt.Fprintf(&b, "\n  JOIN %s AS %s ON %s.%s = %s.%s",
@@ -450,7 +469,7 @@ func (c *compiler) assemble(ctes []string, outCols []string) string {
 
 	dims := c.dims
 	single := c.single
-	first := "m_" + c.baseOrder[0]
+	first := c.cte(c.baseOrder[0])
 
 	// dimension output
 	var sel []string
@@ -468,7 +487,7 @@ func (c *compiler) assemble(ctes []string, outCols []string) string {
 		// grand total: each CTE has exactly one row → CROSS JOIN is safe.
 		b.WriteString("FROM " + first)
 		for _, bm := range c.baseOrder[1:] {
-			b.WriteString(" CROSS JOIN m_" + bm)
+			b.WriteString(" CROSS JOIN " + c.cte(bm))
 		}
 
 	default:
@@ -481,14 +500,14 @@ func (c *compiler) assemble(ctes []string, outCols []string) string {
 		}
 		var unions []string
 		for _, bm := range c.baseOrder {
-			unions = append(unions, "SELECT "+strings.Join(dimCols, ", ")+" FROM m_"+bm)
+			unions = append(unions, "SELECT "+strings.Join(dimCols, ", ")+" FROM "+c.cte(bm))
 		}
-		b.WriteString("FROM (" + strings.Join(unions, " UNION ") + ") keys")
+		b.WriteString("FROM (" + strings.Join(unions, " UNION ") + ") " + c.keysAlias())
 		for _, bm := range c.baseOrder {
-			alias := "m_" + bm
+			alias := c.cte(bm)
 			var on []string
 			for _, d := range dims {
-				l := "keys." + c.d.QuoteIdent(d.name)
+				l := c.keysAlias() + "." + c.d.QuoteIdent(d.name)
 				r := alias + "." + c.d.QuoteIdent(d.name)
 				on = append(on, c.d.DistinctFrom(l, r))
 			}
