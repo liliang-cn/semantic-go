@@ -106,3 +106,61 @@ func TestLintMissingDescription(t *testing.T) {
 		t.Fatalf("expected one description error on revenue, got %+v", errs)
 	}
 }
+
+// A ratio of two integer measures must not divide as an integer.
+//
+// SUM() over an integer column returns an integer on Postgres, SQLite and SQL
+// Server, and integer division truncates: a defect rate of 2198/149815 comes
+// back as 0. The query succeeds, returns a number, and the number is wrong —
+// which is the exact failure this layer exists to make impossible, so it is
+// worth a test per dialect rather than one for the shape.
+func TestIntegerMeasuresDivideAsDecimals(t *testing.T) {
+	m := &Model{
+		Entities: []Entity{{Name: "inspection", Table: "inspection", PrimaryKey: "id"}},
+		Metrics: []Metric{
+			{Name: "defects", Entity: "inspection", Agg: "sum", Expr: "defect_qty"},
+			{Name: "checked", Entity: "inspection", Agg: "sum", Expr: "checked_qty"},
+			{Name: "defect_rate", Formula: "defects / nullif(checked, 0)", Additivity: "non_additive"},
+		},
+	}
+	if err := m.Index(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"postgres", "mysql", "sqlite", "sqlserver", "snowflake", "databricks", "duckdb", "ansi"} {
+		d, ok := DialectByName(name)
+		if !ok {
+			t.Fatalf("%s: no dialect", name)
+		}
+		got, err := Compile(m, Query{Metrics: []string{"defect_rate"}}, d)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		// Both operands, not just the numerator: casting one side is enough for
+		// the arithmetic but leaves the other in place for a reader to copy.
+		if n := strings.Count(got.SQL, "CAST("); n < 2 {
+			t.Errorf("%s: %d cast(s), want both operands cast\n%s", name, n, got.SQL)
+		}
+		if name == "sqlite" && !strings.Contains(got.SQL, "AS REAL") {
+			t.Errorf("sqlite: DECIMAL keeps NUMERIC affinity and still divides as an integer\n%s", got.SQL)
+		}
+	}
+}
+
+// A metric selected on its own is not a division and keeps its natural type.
+func TestPlainMetricIsNotCast(t *testing.T) {
+	m := &Model{
+		Entities: []Entity{{Name: "inspection", Table: "inspection", PrimaryKey: "id"}},
+		Metrics:  []Metric{{Name: "defects", Entity: "inspection", Agg: "sum", Expr: "defect_qty"}},
+	}
+	if err := m.Index(); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := DialectByName("postgres")
+	got, err := Compile(m, Query{Metrics: []string{"defects"}}, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.SQL, "CAST(") {
+		t.Errorf("plain metric should keep its type:\n%s", got.SQL)
+	}
+}

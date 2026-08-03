@@ -14,7 +14,21 @@ type Dialect interface {
 	DateTrunc(grain, expr string) string    // truncate a date/timestamp to a grain
 	Placeholder(i int) string               // bind placeholder for the i-th arg (1-based)
 	DistinctFrom(left, right string) string // null-safe equality for outer joins
+
+	// CastDecimal makes an expression divide as a decimal rather than as an
+	// integer. SUM() over an integer column returns an integer on most engines,
+	// and integer ÷ integer truncates: a defect rate of 1.47% comes back as 0.
+	// The query runs clean and returns a number, which is the worst way for a
+	// metric to be wrong. Engines disagree on how to say it — SQLite's DECIMAL
+	// is NUMERIC affinity and still divides as an integer, so it needs REAL.
+	CastDecimal(expr string) string
 }
+
+// castDecimal38 is the ANSI spelling most engines accept. 28 integer digits is
+// more than any real measure needs, and keeping the scale exact matters: a
+// float would make two runs of the same reconciliation disagree in the last
+// place, and a control query that fails intermittently gets switched off.
+func castDecimal38(expr string) string { return "CAST(" + expr + " AS DECIMAL(38,10))" }
 
 // Postgres dialect.
 type Postgres struct{}
@@ -30,6 +44,7 @@ func (Postgres) Placeholder(i int) string { return fmt.Sprintf("$%d", i) }
 func (Postgres) DistinctFrom(l, r string) string {
 	return l + " IS NOT DISTINCT FROM " + r
 }
+func (Postgres) CastDecimal(e string) string { return "CAST(" + e + " AS numeric)" }
 
 // ANSI is a portable fallback (SQLite/DuckDB-ish): ? placeholders, no date_trunc.
 type ANSI struct{}
@@ -44,6 +59,7 @@ func (ANSI) Placeholder(int) string { return "?" }
 func (ANSI) DistinctFrom(l, r string) string {
 	return "(" + l + " = " + r + " OR (" + l + " IS NULL AND " + r + " IS NULL))"
 }
+func (ANSI) CastDecimal(e string) string { return castDecimal38(e) }
 
 // Snowflake dialect: double-quoted identifiers, positional :N binds, native
 // DATE_TRUNC and IS NOT DISTINCT FROM.
@@ -60,6 +76,7 @@ func (Snowflake) Placeholder(i int) string { return fmt.Sprintf(":%d", i) }
 func (Snowflake) DistinctFrom(l, r string) string {
 	return l + " IS NOT DISTINCT FROM " + r
 }
+func (Snowflake) CastDecimal(e string) string { return "CAST(" + e + " AS NUMBER(38,10))" }
 
 // Databricks (Spark SQL) dialect: backtick-quoted identifiers, ? binds, and the
 // null-safe equality operator <=> for outer joins.
@@ -77,6 +94,7 @@ func (Databricks) Placeholder(int) string { return "?" }
 func (Databricks) DistinctFrom(l, r string) string {
 	return l + " <=> " + r
 }
+func (Databricks) CastDecimal(e string) string { return castDecimal38(e) }
 
 // DuckDB dialect: largely Postgres-compatible (double-quoted identifiers,
 // positional $N binds, native DATE_TRUNC and IS NOT DISTINCT FROM) — its own type
@@ -95,6 +113,7 @@ func (DuckDB) Placeholder(i int) string { return fmt.Sprintf("$%d", i) }
 func (DuckDB) DistinctFrom(l, r string) string {
 	return l + " IS NOT DISTINCT FROM " + r
 }
+func (DuckDB) CastDecimal(e string) string { return castDecimal38(e) }
 
 // MySQL dialect (also MariaDB): backtick identifiers, ? binds, and the null-safe
 // equality operator <=>.
@@ -139,6 +158,7 @@ func (MySQL) Placeholder(int) string { return "?" }
 func (MySQL) DistinctFrom(l, r string) string {
 	return l + " <=> " + r
 }
+func (MySQL) CastDecimal(e string) string { return castDecimal38(e) }
 
 // SQLite dialect: double-quoted identifiers, ? binds, and IS as null-safe
 // equality.
@@ -192,6 +212,7 @@ func (SQLServer) Name() string { return "sqlserver" }
 func (SQLServer) QuoteIdent(id string) string {
 	return "[" + strings.ReplaceAll(id, "]", "]]") + "]"
 }
+func (SQLite) CastDecimal(e string) string { return "CAST(" + e + " AS REAL)" }
 
 func (SQLServer) DateTrunc(grain, expr string) string {
 	g := strings.ToLower(grain)
@@ -207,6 +228,7 @@ func (SQLServer) Placeholder(i int) string { return fmt.Sprintf("@p%d", i) }
 func (SQLServer) DistinctFrom(l, r string) string {
 	return "(" + l + " = " + r + " OR (" + l + " IS NULL AND " + r + " IS NULL))"
 }
+func (SQLServer) CastDecimal(e string) string { return castDecimal38(e) }
 
 // DialectByName resolves a dialect by its Name() (case-insensitive). The bool is
 // false for an unknown name, so callers can fail loudly instead of guessing.

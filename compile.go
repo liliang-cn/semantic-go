@@ -166,7 +166,11 @@ func (c *compiler) exprFor(name string, visiting map[string]bool) (string, error
 				rerr = err
 				return tok
 			}
-			return sub
+			// Cast at the point of substitution, not at the metric's own
+			// definition: a formula is where the division happens, and where a
+			// count of integers stops being a count and becomes a numerator.
+			// A metric selected on its own keeps its natural type.
+			return c.d.CastDecimal(sub)
 		})
 		if rerr != nil {
 			return "", rerr
