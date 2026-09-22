@@ -1,6 +1,12 @@
 # Meridian Retail semantic model — maps the normalized warehouse to business
 # meaning. The agent names metrics/dimensions; it never sees these tables.
 
+name: meridian_retail
+description: >-
+  Retail sales, refunds and store performance — revenue, orders, units, AOV by store, product and customer.
+instructions: >-
+  Use for anything about sales, refunds or store/product/customer mix. Revenue means net_revenue to finance; ask which is meant if the question says "revenue" and the caller is finance.
+
 entities:
   - {name: order,      table: orders,      primary_key: order_id}
   - {name: order_item, table: order_items, primary_key: item_id}
@@ -27,7 +33,10 @@ dimensions:
   - {name: product_category,  entity: product,  column: category,   type: categorical}
   - {name: product_brand,     entity: product,  column: brand,      type: categorical}
   - {name: customer_segment,  entity: customer, column: segment,    type: categorical}
-  - {name: customer_email,    entity: customer, column: email,      type: categorical, mask: "'***'"}
+  # Masked for everyone but support: the rows and the totals over them stay
+  # truthful, the addresses do not leave the warehouse.
+  - {name: customer_email,    entity: customer, column: email,      type: categorical,
+     roles: [support, admin], mask: "'***'"}
   - {name: supplier_country,  entity: supplier, column: country,    type: categorical}
   - {name: order_status,      entity: order,    column: status,     type: categorical}
   - {name: order_date,        entity: order,    column: order_date, type: time}

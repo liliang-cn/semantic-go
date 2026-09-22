@@ -46,7 +46,7 @@ func (m *Model) ResolveMetrics(q *Query) error {
 			if sugg := m.SuggestMetricNames(name, 3); len(sugg) > 0 {
 				return fmt.Errorf("unknown metric %q; did you mean %s?", name, humanList(sugg))
 			}
-			return fmt.Errorf("unknown metric %q (known: %s)", name, strings.Join(m.MetricNames(), ", "))
+			return fmt.Errorf("unknown metric %q (known: %s)", name, summarizeNames(m.MetricNames()))
 		}
 		out[i] = canon
 	}
@@ -186,4 +186,18 @@ func min3(a, b, c int) int {
 		a = c
 	}
 	return a
+}
+
+// maxNamesInError bounds a "known: …" list. A forty-metric domain printed in
+// full is a wall a reader skims and a model spends tokens on; the point of the
+// list is to make a near-miss obvious, and the suggestion above it already
+// does that when there is one.
+const maxNamesInError = 12
+
+// summarizeNames joins names, truncating a long list rather than dumping it.
+func summarizeNames(names []string) string {
+	if len(names) <= maxNamesInError {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(names[:maxNamesInError], ", "), len(names)-maxNamesInError)
 }

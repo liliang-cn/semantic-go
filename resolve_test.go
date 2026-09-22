@@ -5,7 +5,7 @@ import "testing"
 func resolveModel(t *testing.T) *Model {
 	t.Helper()
 	m := &Model{
-		Entities: []Entity{{Name: "sale", Table: "sales", PrimaryKey: "sale_id"}},
+		Entities: []Entity{{Name: "sale", Table: "sales", PrimaryKey: StringList{"sale_id"}}},
 		Metrics: []Metric{
 			{Name: "revenue", Description: "d", Synonyms: []string{"销售额", "营收", "sales", "income"}, Entity: "sale", Agg: "sum", Expr: "amount"},
 			{Name: "units_sold", Description: "d", Synonyms: []string{"销量", "units"}, Entity: "sale", Agg: "sum", Expr: "qty"},

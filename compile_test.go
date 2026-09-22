@@ -12,11 +12,11 @@ func testModel(t *testing.T) *Model {
 	t.Helper()
 	m := &Model{
 		Entities: []Entity{
-			{Name: "order_item", Table: "order_items", PrimaryKey: "id"},
-			{Name: "order", Table: "orders", PrimaryKey: "order_id"},
+			{Name: "order_item", Table: "order_items", PrimaryKey: StringList{"id"}},
+			{Name: "order", Table: "orders", PrimaryKey: StringList{"order_id"}},
 		},
 		Joins: []Join{
-			{From: "order_item", To: "order", FromKey: "order_id", ToKey: "order_id", Cardinality: "many_to_one"},
+			{From: "order_item", To: "order", FromKey: StringList{"order_id"}, ToKey: StringList{"order_id"}, Cardinality: "many_to_one"},
 		},
 		Dimensions: []Dimension{
 			{Name: "order_date", Entity: "order", Column: "order_date", Type: "time"},
@@ -116,7 +116,7 @@ func TestLintMissingDescription(t *testing.T) {
 // worth a test per dialect rather than one for the shape.
 func TestIntegerMeasuresDivideAsDecimals(t *testing.T) {
 	m := &Model{
-		Entities: []Entity{{Name: "inspection", Table: "inspection", PrimaryKey: "id"}},
+		Entities: []Entity{{Name: "inspection", Table: "inspection", PrimaryKey: StringList{"id"}}},
 		Metrics: []Metric{
 			{Name: "defects", Entity: "inspection", Agg: "sum", Expr: "defect_qty"},
 			{Name: "checked", Entity: "inspection", Agg: "sum", Expr: "checked_qty"},
@@ -149,7 +149,7 @@ func TestIntegerMeasuresDivideAsDecimals(t *testing.T) {
 // A metric selected on its own is not a division and keeps its natural type.
 func TestPlainMetricIsNotCast(t *testing.T) {
 	m := &Model{
-		Entities: []Entity{{Name: "inspection", Table: "inspection", PrimaryKey: "id"}},
+		Entities: []Entity{{Name: "inspection", Table: "inspection", PrimaryKey: StringList{"id"}}},
 		Metrics:  []Metric{{Name: "defects", Entity: "inspection", Agg: "sum", Expr: "defect_qty"}},
 	}
 	if err := m.Index(); err != nil {

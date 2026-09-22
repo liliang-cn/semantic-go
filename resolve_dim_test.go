@@ -4,7 +4,7 @@ import "testing"
 
 func TestResolveDimensionSynonym(t *testing.T) {
 	m := &Model{
-		Entities: []Entity{{Name: "store", Table: "stores", PrimaryKey: "store_id"}},
+		Entities: []Entity{{Name: "store", Table: "stores", PrimaryKey: StringList{"store_id"}}},
 		Dimensions: []Dimension{{
 			Name: "store_region", Entity: "store", Column: "region",
 			Type: "categorical", Synonyms: []string{"大区", "区域"},

@@ -1,0 +1,133 @@
+# Guard-shift analytics. Two fact tables at different native grains (shift and
+# shift_pay), conformed onto guard/region; a bridge to sites that must NOT be
+# traversable; and an invoicing fact with no conformed dimension shared with
+# shifts, so a shift×invoice question has to be refused rather than joined.
+
+name: exec_security_shifts
+description: >-
+  Guard shift and pay-rule analytics — hours, headcount and award cost by region, guard and shift type.
+instructions: >-
+  Use for shift, pay rate and award compliance analysis. Hours live at shift grain and cost at pay-component grain; ask for both and each is aggregated where it lives.
+
+entities:
+  - name: guard
+    table: guards
+    primary_key: guard_id
+    grain: one row per guard
+    grain_status: pass
+
+  - name: shift
+    table: guard_shifts
+    primary_key: [guard_id, shift_id]     # composite grain
+    grain: one row per (guard_id, shift_id)
+    grain_status: pass
+
+  - name: shift_pay
+    table: shift_pay
+    primary_key: [guard_id, shift_id, pay_component_id]
+    grain: one row per pay component of a shift — FINER than shift
+    grain_status: pass
+
+  - name: site
+    table: sites
+    primary_key: site_id
+    grain_status: pass
+
+  - name: site_assignment
+    table: site_assignments
+    primary_key: assignment_id
+    grain: one row per (shift, site) — the bridge that makes shift×site many-to-many
+    grain_status: pass
+
+  - name: client
+    table: clients
+    primary_key: client_id
+    grain_status: pass
+
+  - name: invoice
+    table: invoices
+    primary_key: invoice_id
+    grain_status: pass
+
+joins:
+  # shift_pay is many rows per shift; the composite key must be joined on BOTH
+  # columns, or every shift's pay rows would land on the wrong shift.
+  - {from: shift_pay, to: shift, cardinality: many_to_one, from_key: [guard_id, shift_id], to_key: [guard_id, shift_id]}
+  - {from: shift,     to: guard, cardinality: many_to_one, from_key: guard_id, to_key: guard_id}
+
+  # The bridge. Neither edge is wrong; the PATH is. shift → site_assignment is
+  # one-to-many, so walking it to reach a site attribute would multiply every
+  # shift by the number of sites it covered.
+  - {from: shift,           to: site_assignment, cardinality: one_to_many, from_key: shift_id, to_key: shift_id}
+  - {from: site_assignment, to: site,            cardinality: many_to_one, from_key: site_id,  to_key: site_id}
+
+  # Invoicing lives on the other side of the model: it shares no dimension with
+  # shifts, which is what makes "hours and invoiced amount by region" a chasm
+  # trap rather than a query.
+  - {from: invoice, to: client, cardinality: many_to_one, from_key: client_id, to_key: client_id}
+
+dimensions:
+  - {name: guard_region,         entity: guard,     column: region,     type: categorical, synonyms: [region, area]}
+  # A guard's name identifies a person. Rostering needs it; a cost report does
+  # not, and gets the initial instead — the shift counts stay right either way.
+  - {name: guard_name,           entity: guard,     column: name,       type: categorical, synonyms: [guard],
+     roles: [rostering, admin], mask: "substr(name, 1, 1) || '.'"}
+  - {name: shift_date,           entity: shift,     column: shift_date, type: time,        synonyms: [date, when]}
+  - {name: shift_type,           entity: shift,     column: shift_type, type: categorical, synonyms: [shift kind, roster type]}
+  - {name: pay_component,        entity: shift_pay, column: component,  type: categorical, synonyms: [pay element]}
+  - {name: client_site_category, entity: site,      column: category,   type: categorical, synonyms: [site category]}
+  - {name: client_name,          entity: client,    column: name,       type: categorical, synonyms: [client]}
+
+metrics:
+  - name: total_shift_hours
+    description: "Total hours worked across all shifts, at shift grain."
+    synonyms: [hours worked, labour hours, shift hours]
+    entity: shift
+    agg: sum
+    expr: hours_worked
+    additivity: additive
+
+  - name: distinct_guards_rostered
+    description: "Number of distinct guards who worked at least one matching shift."
+    synonyms: [guards rostered, headcount]
+    entity: shift
+    agg: count_distinct
+    expr: guard_id
+    additivity: non_additive
+
+  - name: avg_shift_hours
+    description: "Mean hours per shift. An average — never summed."
+    synonyms: [average shift length, mean hours]
+    entity: shift
+    agg: avg
+    expr: hours_worked
+    additivity: non_additive
+
+  - name: total_shift_cost
+    description: "Total cost of shifts at applied award rates, summed over pay components."
+    synonyms: [labour cost, wage cost, what it cost]
+    entity: shift_pay
+    agg: sum
+    expr: amount
+    additivity: additive
+
+  - name: cost_per_hour
+    description: "Effective hourly cost: shift cost divided by hours worked."
+    synonyms: [effective rate, hourly cost]
+    formula: "total_shift_cost / nullif(total_shift_hours, 0)"
+    additivity: non_additive
+
+  - name: total_invoiced
+    description: "Total amount invoiced to clients."
+    synonyms: [invoiced, billings]
+    entity: invoice
+    agg: sum
+    expr: amount
+    additivity: additive
+    roles: [finance, admin]
+
+  - name: hours_cumulative
+    description: "Running total of hours worked over time."
+    synonyms: [cumulative hours, running hours]
+    of: total_shift_hours
+    window: cumulative

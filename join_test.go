@@ -12,15 +12,15 @@ import (
 func TestRolePlayingDimensions(t *testing.T) {
 	m := &Model{
 		Entities: []Entity{
-			{Name: "order_item", Table: "order_items", PrimaryKey: "id"},
-			{Name: "order", Table: "orders", PrimaryKey: "order_id"},
-			{Name: "sale_store", Table: "stores", PrimaryKey: "store_id"},
-			{Name: "ship_store", Table: "stores", PrimaryKey: "store_id"},
+			{Name: "order_item", Table: "order_items", PrimaryKey: StringList{"id"}},
+			{Name: "order", Table: "orders", PrimaryKey: StringList{"order_id"}},
+			{Name: "sale_store", Table: "stores", PrimaryKey: StringList{"store_id"}},
+			{Name: "ship_store", Table: "stores", PrimaryKey: StringList{"store_id"}},
 		},
 		Joins: []Join{
-			{From: "order_item", To: "order", FromKey: "order_id", ToKey: "order_id", Cardinality: "many_to_one"},
-			{From: "order", To: "sale_store", FromKey: "store_id", ToKey: "store_id", Cardinality: "many_to_one"},
-			{From: "order", To: "ship_store", FromKey: "ship_store_id", ToKey: "store_id", Cardinality: "many_to_one"},
+			{From: "order_item", To: "order", FromKey: StringList{"order_id"}, ToKey: StringList{"order_id"}, Cardinality: "many_to_one"},
+			{From: "order", To: "sale_store", FromKey: StringList{"store_id"}, ToKey: StringList{"store_id"}, Cardinality: "many_to_one"},
+			{From: "order", To: "ship_store", FromKey: StringList{"ship_store_id"}, ToKey: StringList{"store_id"}, Cardinality: "many_to_one"},
 		},
 		Dimensions: []Dimension{
 			{Name: "sale_region", Entity: "sale_store", Column: "region", Type: "categorical"},
@@ -61,13 +61,13 @@ func bridgeModel(t *testing.T) *Model {
 	t.Helper()
 	m := &Model{
 		Entities: []Entity{
-			{Name: "enrollment", Table: "enrollments", PrimaryKey: "id"},
-			{Name: "student", Table: "students", PrimaryKey: "student_id"},
-			{Name: "course", Table: "courses", PrimaryKey: "course_id"},
+			{Name: "enrollment", Table: "enrollments", PrimaryKey: StringList{"id"}},
+			{Name: "student", Table: "students", PrimaryKey: StringList{"student_id"}},
+			{Name: "course", Table: "courses", PrimaryKey: StringList{"course_id"}},
 		},
 		Joins: []Join{
-			{From: "enrollment", To: "student", FromKey: "student_id", ToKey: "student_id", Cardinality: "many_to_one"},
-			{From: "enrollment", To: "course", FromKey: "course_id", ToKey: "course_id", Cardinality: "many_to_one"},
+			{From: "enrollment", To: "student", FromKey: StringList{"student_id"}, ToKey: StringList{"student_id"}, Cardinality: "many_to_one"},
+			{From: "enrollment", To: "course", FromKey: StringList{"course_id"}, ToKey: StringList{"course_id"}, Cardinality: "many_to_one"},
 		},
 		Dimensions: []Dimension{
 			{Name: "student_name", Entity: "student", Column: "name", Type: "categorical"},
