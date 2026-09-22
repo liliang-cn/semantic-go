@@ -1,0 +1,64 @@
+{
+  "project_name": "exec_security",
+  "semantic_models": [
+    {
+      "name": "guards",
+      "description": "one row per guard",
+      "node_relation": {"alias": "guards", "schema_name": "public", "database": "pay",
+                        "relation_name": "\"pay\".\"public\".\"guards\""},
+      "entities": [{"name": "guard", "type": "primary", "expr": "guard_id"}],
+      "dimensions": [{"name": "region", "type": "categorical"},
+                     {"name": "guard_name", "type": "categorical", "expr": "name"}],
+      "measures": []
+    },
+    {
+      "name": "shifts",
+      "description": "one row per (guard_id, shift_id)",
+      "node_relation": {"alias": "guard_shifts", "schema_name": "public", "database": "pay",
+                        "relation_name": "\"pay\".\"public\".\"guard_shifts\""},
+      "entities": [
+        {"name": "shift", "type": "primary", "expr": "shift_id"},
+        {"name": "guard", "type": "foreign", "expr": "guard_id"}
+      ],
+      "dimensions": [
+        {"name": "shift_date", "type": "time", "type_params": {"time_granularity": "day"}},
+        {"name": "shift_type", "type": "categorical"}
+      ],
+      "measures": [
+        {"name": "shift_hours", "agg": "sum", "expr": "hours_worked",
+         "description": "Total hours worked across all shifts."},
+        {"name": "guards_rostered", "agg": "count_distinct", "expr": "guard_id",
+         "description": "Distinct guards who worked a matching shift."}
+      ]
+    },
+    {
+      "name": "shift_pay",
+      "node_relation": {"relation_name": "\"pay\".\"public\".\"shift_pay\""},
+      "entities": [
+        {"name": "pay_component", "type": "primary", "expr": "pay_component_id"},
+        {"name": "shift", "type": "foreign", "expr": "shift_id"}
+      ],
+      "dimensions": [{"name": "component", "type": "categorical"}],
+      "measures": [{"name": "shift_cost", "agg": "sum", "expr": "amount",
+                    "description": "Total cost of shifts at applied award rates."}]
+    }
+  ],
+  "metrics": [
+    {"name": "total_shift_hours", "type": "simple", "label": "Hours worked",
+     "type_params": {"measure": {"name": "shift_hours"}}},
+    {"name": "distinct_guards_rostered", "type": "simple",
+     "type_params": {"measure": {"name": "guards_rostered"}}},
+    {"name": "total_shift_cost", "type": "simple", "label": "Labour cost",
+     "type_params": {"measure": {"name": "shift_cost"}}},
+    {"name": "cost_per_hour", "type": "ratio", "description": "Effective hourly cost.",
+     "type_params": {"numerator": {"name": "total_shift_cost"},
+                     "denominator": {"name": "total_shift_hours"}}},
+    {"name": "hours_less_cost_units", "type": "derived", "description": "A derived example with an alias.",
+     "type_params": {"expr": "h - c / 100",
+                     "metrics": [{"name": "total_shift_hours", "alias": "h"},
+                                 {"name": "total_shift_cost", "alias": "c"}]}},
+    {"name": "hours_ytd", "type": "cumulative", "description": "Hours, year to date.",
+     "type_params": {"measure": {"name": "shift_hours"},
+                     "cumulative_type_params": {"grain_to_date": "year"}}}
+  ]
+}

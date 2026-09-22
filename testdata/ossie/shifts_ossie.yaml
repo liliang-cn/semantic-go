@@ -1,0 +1,88 @@
+# The same domain expressed in the interchange format, shaped after the spec's
+# own example: datasets with sources and key tuples, fields carrying dimension
+# blocks, metrics carrying per-dialect SQL, relationships as foreign keys.
+semantic_model:
+  - name: exec_security_shifts
+    description: Guard shift and pay rule analytics
+    ai_context:
+      instructions: "Use for shift, pay rate, and award compliance analysis"
+
+    datasets:
+      - name: guards
+        source: pay.public.guards
+        primary_key: [guard_id]
+        grain_status: pass
+        fields:
+          - name: region
+            description: Operating region the guard is rostered in
+            dimension: {}
+          - name: guard_name
+            column: name
+            dimension: {}
+
+      - name: shifts
+        source: pay.public.guard_shifts
+        primary_key: [guard_id, shift_id]
+        grain: one row per (guard_id, shift_id)
+        grain_status: pass
+        fields:
+          - name: shift_date
+            dimension:
+              is_time: true
+          - name: shift_type
+            dimension: {}
+          - name: hours_worked      # a measure input, not a dimension
+
+      - name: shift_pay
+        source: pay.public.shift_pay
+        primary_key: [guard_id, shift_id, pay_component_id]
+        grain_status: pass
+        fields:
+          - name: component
+            dimension: {}
+
+    metrics:
+      - name: total_shift_hours
+        description: Total hours worked across all shifts
+        synonyms: [hours worked, labour hours]
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(shifts.hours_worked)
+
+      - name: distinct_guards_rostered
+        description: Distinct guards who worked a matching shift
+        synonyms: [headcount]
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: COUNT(DISTINCT shifts.guard_id)
+
+      - name: total_shift_cost
+        description: Total cost of shifts at applied award rates
+        synonyms: [labour cost, wage cost]
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(shift_pay.amount)
+            - dialect: BIGQUERY
+              expression: SUM(shift_pay.amount)
+
+      # Not expressible as a single aggregate call — declared through the
+      # documented escape hatch rather than lost.
+      - name: cost_per_hour
+        description: Effective hourly cost
+        synonyms: [effective rate]
+        custom_extensions:
+          semantic_go:
+            formula: "total_shift_cost / nullif(total_shift_hours, 0)"
+            additivity: non_additive
+
+    relationships:
+      # to_fields land exactly on shifts' declared primary key ⇒ many-to-one.
+      - name: pay_to_shift
+        from: {dataset: shift_pay, fields: [guard_id, shift_id]}
+        to: {dataset: shifts, fields: [guard_id, shift_id]}
+      - name: shift_to_guard
+        from: {dataset: shifts, fields: [guard_id]}
+        to: {dataset: guards, fields: [guard_id]}
