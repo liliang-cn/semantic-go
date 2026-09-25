@@ -509,6 +509,10 @@ type resolvedDim struct {
 	typ    string // categorical | time
 	sqlRaw string // qualified column, e.g. "stores"."region"
 	sql    string // sqlRaw, or date_trunc(grain, sqlRaw) for time dims
+	// constant is a mask that references no column — '***', NULL, a number.
+	// It is projected like any other dimension and left out of GROUP BY; see
+	// buildCTE for why.
+	constant bool
 }
 
 func (c *compiler) resolveDims(names []string) error {
@@ -532,12 +536,13 @@ func (c *compiler) resolveDims(names []string) error {
 			// also has a name column, and breaks at run time.
 			raw = qualifyExpr(dim.Mask, dim.Entity, c.d)
 		}
+		constant := !dim.visibleTo(c.q.Roles) && constantExpr(dim.Mask)
 		expr := raw
 		if dim.Type == "time" && c.q.TimeGrain != "" {
 			expr = c.d.DateTrunc(c.q.TimeGrain, raw)
 			applied = true
 		}
-		out = append(out, resolvedDim{name: n, entity: dim.Entity, typ: dim.Type, sqlRaw: raw, sql: expr})
+		out = append(out, resolvedDim{name: n, entity: dim.Entity, typ: dim.Type, sqlRaw: raw, sql: expr, constant: constant})
 	}
 	// A grain that matched no time dimension used to be dropped in silence: ask
 	// for revenue by month against a dimension the model calls categorical and
@@ -614,6 +619,17 @@ func (c *compiler) buildCTE(metricName string, dims []resolvedDim) (string, erro
 	var grp []string
 	for _, d := range dims {
 		sel = append(sel, d.sql+" AS "+c.d.QuoteIdent(d.name))
+		// A constant mask is projected but not grouped by. Grouping by a
+		// constant changes nothing about the groups — every row falls in the
+		// same one, which is exactly what masking asks for — and writing it
+		// out is an error on the engines that matter: Postgres refuses
+		// `GROUP BY '***'` as a non-integer constant, and SQL Server refuses a
+		// GROUP BY term with no column in it. SQLite accepts it, which is why
+		// the compiled SQL passed every test here and failed the first time a
+		// masked dimension was asked for against a real Postgres warehouse.
+		if d.constant {
+			continue
+		}
 		grp = append(grp, d.sql)
 	}
 	sel = append(sel, agg+" AS "+c.d.QuoteIdent(metricName))
@@ -1110,3 +1126,12 @@ func containsName(ss []string, s string) bool {
 	}
 	return false
 }
+
+// constantRe matches a SQL literal: a quoted string (with doubled quotes), a
+// number, NULL, TRUE or FALSE — optionally parenthesised or cast.
+var constantRe = regexp.MustCompile(`(?is)^\(*\s*('([^']|'')*'|-?\d+(\.\d+)?|null|true|false)\s*\)*(\s*::\s*[a-z_ ]+(\(\d+(,\s*\d+)?\))?)?\s*$`)
+
+// constantExpr reports whether a mask references no column at all. Only a
+// literal qualifies: an expression like substr(email, 1, 1) is grouped by, on
+// purpose, because its groups are the masked values themselves.
+func constantExpr(expr string) bool { return constantRe.MatchString(strings.TrimSpace(expr)) }
