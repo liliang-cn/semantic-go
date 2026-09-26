@@ -639,11 +639,11 @@ func (c *compiler) buildCTE(metricName string, dims []resolvedDim) (string, erro
 	// columns qualify against the alias and role-playing/bridge entities on the
 	// same physical table stay distinct.
 	fmt.Fprintf(&b, "%s AS (\n  SELECT %s\n  FROM %s AS %s", c.cte(metricName), strings.Join(sel, ", "),
-		c.d.QuoteIdent(c.m.Entity(base).Table), c.d.QuoteIdent(base))
+		QuoteTable(c.d, c.m.Entity(base).Table), c.d.QuoteIdent(base))
 	c.useEntity(base)
 	for _, j := range joins {
 		fmt.Fprintf(&b, "\n  JOIN %s AS %s ON %s",
-			c.d.QuoteIdent(j.rightTable), c.d.QuoteIdent(j.rightAlias), c.on(j))
+			QuoteTable(c.d, j.rightTable), c.d.QuoteIdent(j.rightAlias), c.on(j))
 		c.useEntity(j.rightAlias)
 		c.noteJoin(j)
 	}
@@ -1135,3 +1135,20 @@ var constantRe = regexp.MustCompile(`(?is)^\(*\s*('([^']|'')*'|-?\d+(\.\d+)?|nul
 // literal qualifies: an expression like substr(email, 1, 1) is grouped by, on
 // purpose, because its groups are the masked values themselves.
 func constantExpr(expr string) bool { return constantRe.MatchString(strings.TrimSpace(expr)) }
+
+// QuoteTable quotes a table reference part by part.
+//
+// A table named with its schema — `public.workshop`, or the
+// `database.schema.table` that every dbt manifest records — was quoted as one
+// identifier, "faw_axle.dbt_semcmp.stg_energy_meter", which no engine
+// resolves. So every model imported from dbt failed on its first query
+// against a real warehouse, and so did any hand-written model that named a
+// schema; nothing here had ever been tested with one. Each dotted part is an
+// identifier of its own and is quoted as one.
+func QuoteTable(d Dialect, table string) string {
+	parts := strings.Split(table, ".")
+	for i, p := range parts {
+		parts[i] = d.QuoteIdent(p)
+	}
+	return strings.Join(parts, ".")
+}

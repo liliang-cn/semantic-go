@@ -118,7 +118,7 @@ func (m *Model) GrainCheckSQL(entity string, d Dialect) (string, error) {
 	list := strings.Join(cols, ", ")
 	return fmt.Sprintf(
 		"SELECT %s, COUNT(*) AS %s\nFROM %s\nGROUP BY %s\nHAVING COUNT(*) > 1",
-		list, d.QuoteIdent("n_rows"), d.QuoteIdent(e.Table), list), nil
+		list, d.QuoteIdent("n_rows"), QuoteTable(d, e.Table), list), nil
 }
 
 // GrainCheckSuite emits one uniqueness test per entity, in definition order —
